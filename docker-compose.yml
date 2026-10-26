@@ -1,6 +1,6 @@
 services:
   dsh:
-    image: ghcr.io/pkgship/deepseek-harness:latest
+    image: pkgship/deepseek-harness:latest
     container_name: dsh
     ports:
       - "3080:3080"

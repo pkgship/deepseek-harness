@@ -22,7 +22,7 @@ docker run -d --name dsh \
   -v dsh-home:/home/node/.dsh \
   -v dsh-workspace:/workspace \
   --restart unless-stopped \
-  ghcr.io/pkgship/deepseek-harness:latest
+  pkgship/deepseek-harness:latest
 
 docker logs -f dsh
 ```
@@ -44,7 +44,7 @@ docker run -d --name dsh \
   -v dsh-home:/home/node/.dsh \
   -v dsh-workspace:/workspace \
   --restart unless-stopped \
-  ghcr.io/pkgship/deepseek-harness:latest
+  pkgship/deepseek-harness:latest
 ```
 
 Or use the included `docker-compose.yml`:
@@ -65,7 +65,7 @@ docker run -d --name dsh \
   -v dsh-home:/home/node/.dsh \
   -v dsh-workspace:/workspace \
   --restart unless-stopped \
-  ghcr.io/pkgship/deepseek-harness:latest
+  pkgship/deepseek-harness:latest
 ```
 
 Then open the `dsh web: http://192.168.1.50:3080/?token=...` line from the logs.
@@ -99,7 +99,7 @@ docker run -d --name dsh \
   -e DSH_TLS_KEY=/certs/privkey.pem \
   -v dsh-home:/home/node/.dsh \
   --restart unless-stopped \
-  ghcr.io/pkgship/deepseek-harness:latest
+  pkgship/deepseek-harness:latest
 ```
 
 The certificate must cover the hostname or IP the browser opens, and both files must be readable by UID 1000. With a reverse proxy or tunnel in front, terminate TLS there instead and keep `DSH_PUBLIC_URL` on the external HTTPS URL.
@@ -123,11 +123,11 @@ The certificate must cover the hostname or IP the browser opens, and both files 
 
 Every build also gets a `sha-<commit>` tag and a `dsh-<version>` tag for the resolved `@deepseek-ai/dsh` release. For git tags such as `v1.0.0`, builds get version tags too. The devtools variant prefixes all of them with `devtools-` (`devtools-sha-...`, `devtools-dsh-...`).
 
-When Docker Hub publishing is enabled, the same tags appear under `docker.io/<dockerhub-user>/deepseek-harness`, for example `<dockerhub-user>/deepseek-harness:devtools-latest`.
+All tags are published on Docker Hub as `pkgship/deepseek-harness`, for example `pkgship/deepseek-harness:devtools-latest`.
 
 ## Building and publishing
 
-The GitHub Actions workflow in [`.github/workflows/docker.yml`](.github/workflows/docker.yml) builds both variants for `linux/amd64` and `linux/arm64` and pushes them to GHCR. When the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets are set, the same image is pushed to Docker Hub at the same time, under `docker.io/<DOCKERHUB_USERNAME>/deepseek-harness`, with the identical tag set:
+The GitHub Actions workflow in [`.github/workflows/docker.yml`](.github/workflows/docker.yml) builds both variants for `linux/amd64` and `linux/arm64` and pushes them to Docker Hub as `pkgship/deepseek-harness`, authenticating with the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets:
 
 - daily schedule (02:15 UTC) → resolve the npm `latest` dist-tag and build only if `dsh-<version>` or `devtools-dsh-<version>` is missing
 - push to `main` → `latest` / `devtools-latest`
@@ -139,13 +139,7 @@ Every build installs the exact version resolved by the upstream job, so a build 
 
 ### Automatic upstream tracking
 
-The schedule checks `https://registry.npmjs.org/@deepseek-ai/dsh/latest` once a day. Unless both `dsh-<version>` and `devtools-dsh-<version>` already exist in GHCR, it rebuilds both variants, refreshes `latest`, and adds the version tags. GHCR stays the gate for that decision; if a run pushed to one registry but failed on the other, trigger the workflow manually to re-publish both. This follows npm's `latest` dist-tag, which is what the image installs; a GitHub release that is not published to that dist-tag (or a version only available under `next`) will not trigger it, but you can build it with manual dispatch. Scheduled workflows only run once this file is on the default branch.
-
-After the first push, the GHCR package is private by default. Make it public in the package settings, or authenticate before pulling:
-
-```sh
-echo "$GITHUB_TOKEN" | docker login ghcr.io -u <user> --password-stdin
-```
+The schedule checks `https://registry.npmjs.org/@deepseek-ai/dsh/latest` once a day. Unless both `dsh-<version>` and `devtools-dsh-<version>` already exist on Docker Hub, it rebuilds both variants, refreshes `latest`, and adds the version tags. This follows npm's `latest` dist-tag, which is what the image installs; a GitHub release that is not published to that dist-tag (or a version only available under `next`) will not trigger it, but you can build it with manual dispatch. Scheduled workflows only run once this file is on the default branch.
 
 Local build:
 

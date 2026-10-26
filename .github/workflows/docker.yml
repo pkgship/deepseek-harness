@@ -20,28 +20,17 @@ concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  REGISTRY: ghcr.io
-
 permissions:
   contents: read
-  packages: write
 
 jobs:
   upstream:
     name: Resolve upstream
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       build: ${{ github.event_name != 'schedule' || steps.published.outputs.exists != 'true' }}
     steps:
-      - name: Resolve image name
-        id: image
-        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-
       - name: Resolve @deepseek-ai/dsh version
         id: version
         env:
@@ -60,33 +49,20 @@ jobs:
         id: published
         if: github.event_name == 'schedule'
         env:
-          IMAGE: ${{ steps.image.outputs.name }}
+          REPO: ${{ github.repository }}
           VERSION: ${{ steps.version.outputs.version }}
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          token=""
-          if ! token=$(curl -fsSL -u "${GHCR_USER}:${GHCR_TOKEN}" \
-              "https://ghcr.io/token?service=ghcr.io&scope=repository:${IMAGE}:pull" | jq -r '.token // empty'); then
-            token=""
-          fi
-          if [[ -z "$token" ]]; then
-            echo "no GHCR pull token (package may not exist yet); treating ${VERSION} as unpublished"
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          repo="${REPO,,}"
           missing=0
           for tag in "dsh-${VERSION}" "devtools-dsh-${VERSION}"; do
             code=$(curl -sS -o /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer ${token}" \
-              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
-              "https://ghcr.io/v2/${IMAGE}/manifests/${tag}")
+              "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}")
             echo "${tag}: HTTP ${code}"
             case "$code" in
               200) ;;
               404) missing=1 ;;
-              *) echo "unexpected GHCR response ${code} for ${tag}" >&2; exit 1 ;;
+              *) echo "unexpected Docker Hub response ${code} for ${tag}" >&2; exit 1 ;;
             esac
           done
           if [[ "$missing" -eq 0 ]]; then
@@ -116,27 +92,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Resolve image names
+      - name: Resolve image name
         id: image
-        env:
-          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: |
-          set -euo pipefail
-          repo="${GITHUB_REPOSITORY#*/}"
-          repo="${repo,,}"
-          images="${REGISTRY}/${GITHUB_REPOSITORY,,}"
-          hub="absent"
-          if [[ -n "${DOCKERHUB_USER}" ]]; then
-            images="${images}"$'\n'"docker.io/${DOCKERHUB_USER,,}/${repo}"
-            hub="ready"
-          fi
-          {
-            echo "images<<dsh-images"
-            printf '%s\n' "$images"
-            echo "dsh-images"
-            echo "hub=${hub}"
-          } >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$images"
+        run: echo "name=docker.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v4
         if: github.event_name != 'pull_request'
@@ -146,14 +104,6 @@ jobs:
       - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/login-action@v4
-        if: github.event_name != 'pull_request' && steps.image.outputs.hub == 'ready'
-        with:
-          registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
@@ -161,7 +111,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ steps.image.outputs.images }}
+          images: ${{ steps.image.outputs.name }}
           flavor: ${{ matrix.flavor }}
           labels: |
             org.opencontainers.image.version=${{ needs.upstream.outputs.version }}
