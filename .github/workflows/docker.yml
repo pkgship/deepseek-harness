@@ -1,0 +1,164 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    # Daily at 02:15 UTC (10:15 CST). Builds only when npm's latest tag is new.
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+    inputs:
+      dsh_version:
+        description: npm version or dist-tag of @deepseek-ai/dsh
+        required: false
+        default: latest
+        type: string
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  upstream:
+    name: Resolve upstream
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build: ${{ github.event_name != 'schedule' || steps.published.outputs.exists != 'true' }}
+    steps:
+      - name: Resolve image name
+        id: image
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve @deepseek-ai/dsh version
+        id: version
+        env:
+          REQUESTED: ${{ inputs.dsh_version || 'latest' }}
+        run: |
+          set -euo pipefail
+          version=$(curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/${REQUESTED}" | jq -r '.version // empty')
+          if [[ -z "$version" ]]; then
+            echo "cannot resolve @deepseek-ai/dsh@${REQUESTED} on npm" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "@deepseek-ai/dsh@${REQUESTED} -> ${version}"
+
+      - name: Check whether this version is published
+        id: published
+        if: github.event_name == 'schedule'
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          token=""
+          if ! token=$(curl -fsSL -u "${GHCR_USER}:${GHCR_TOKEN}" \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:${IMAGE}:pull" | jq -r '.token // empty'); then
+            token=""
+          fi
+          if [[ -z "$token" ]]; then
+            echo "no GHCR pull token (package may not exist yet); treating ${VERSION} as unpublished"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          missing=0
+          for tag in "dsh-${VERSION}" "devtools-dsh-${VERSION}"; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${token}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/${IMAGE}/manifests/${tag}")
+            echo "${tag}: HTTP ${code}"
+            case "$code" in
+              200) ;;
+              404) missing=1 ;;
+              *) echo "unexpected GHCR response ${code} for ${tag}" >&2; exit 1 ;;
+            esac
+          done
+          if [[ "$missing" -eq 0 ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: ${{ matrix.variant }}
+    needs: upstream
+    if: needs.upstream.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: docker-${{ github.ref }}-${{ matrix.variant }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: runtime
+            devtools: "0"
+            flavor: ""
+          - variant: devtools
+            devtools: "1"
+            flavor: "prefix=devtools-"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve image name
+        id: image
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v4
+        if: github.event_name != 'pull_request'
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          flavor: ${{ matrix.flavor }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.upstream.outputs.version }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+            type=raw,value=dsh-${{ needs.upstream.outputs.version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            INSTALL_DEVTOOLS=${{ matrix.devtools }}
+            DSH_VERSION=${{ needs.upstream.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}

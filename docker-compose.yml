@@ -1,0 +1,22 @@
+services:
+  dsh:
+    image: ghcr.io/pkgship/deepseek-harness:latest
+    container_name: dsh
+    ports:
+      - "3080:3080"
+    environment:
+      # Address the browser uses. Change it when accessing from another machine,
+      # e.g. http://192.168.1.50:3080/ — its authority is trusted automatically.
+      DSH_PUBLIC_URL: http://localhost:3080/
+      # Extra accepted authorities, comma or space separated.
+      # DSH_TRUSTED_HOSTS: dsh.lan,192.168.1.50
+    volumes:
+      - dsh-home:/home/node/.dsh
+      - dsh-workspace:/workspace
+      # To work on host files, replace the line above with a bind mount owned by UID 1000:
+      # - ./workspace:/workspace
+    restart: unless-stopped
+
+volumes:
+  dsh-home:
+  dsh-workspace:
