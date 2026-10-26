@@ -72,7 +72,7 @@ RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 
 # hadolint ignore=DL3066
 USER node
-RUN dsh --version
+RUN dsh --version && pnpm --version
 
 WORKDIR /workspace
 
