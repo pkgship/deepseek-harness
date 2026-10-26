@@ -25,6 +25,14 @@ public_authority="${public_url#*://}"
 public_authority="${public_authority%%/*}"
 [[ -n "$public_authority" ]] || die "DSH_PUBLIC_URL=$public_url does not name a host."
 
+# The port-less host is trusted alongside the exact authority so republishing the
+# container on another host port does not fail the Host fence.
+if [[ "$public_authority" == \[* ]]; then
+  public_host="${public_authority%%]*}]"
+else
+  public_host="${public_authority%%:*}"
+fi
+
 mkdir -p "$DSH_HOME" || die "cannot create DSH_HOME=$DSH_HOME"
 
 # The container starts as root for this step alone: a bind mount, or files left by
@@ -55,6 +63,8 @@ args=(
   --public-url "$public_url"
   --trusted-host "$public_authority"
 )
+
+[[ "$public_host" == "$public_authority" ]] || args+=(--trusted-host "$public_host")
 
 if [[ -n "${DSH_TRUSTED_HOSTS:-}" ]]; then
   read -r -a trusted_hosts <<< "${DSH_TRUSTED_HOSTS//,/ }"

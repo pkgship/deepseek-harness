@@ -56,7 +56,7 @@ docker compose logs -f dsh
 
 ## Accessing from another machine
 
-Set `DSH_PUBLIC_URL` to the address the browser actually uses. The image adds that authority to DSH's `--trusted-host` list, so the Host fence accepts it:
+Set `DSH_PUBLIC_URL` to the address the browser actually uses. The image adds its authority and its bare hostname to DSH's `--trusted-host` list, so the Host fence accepts that host on any published port:
 
 ```sh
 docker run -d --name dsh \
@@ -80,7 +80,7 @@ Plain HTTP on a LAN sends the launch token and session cookie unencrypted. Use a
 | --- | --- | --- |
 | `DSH_HOST` | first container IPv4 | Concrete local IP to bind. Wildcards such as `0.0.0.0` are rejected. Leave unset normally. |
 | `DSH_PORT` | `3080` | Listener port inside the container. |
-| `DSH_PUBLIC_URL` | `http://localhost:<DSH_PORT>/` | Browser-facing address. Sets the printed login URL, `DSH_WEB_URL`, and the automatically trusted authority. |
+| `DSH_PUBLIC_URL` | `http://localhost:<DSH_PORT>/` | Browser-facing address. Sets the printed login URL, `DSH_WEB_URL`, and the trusted authority (`host:port` and `host`, so a republished host port still passes the fence). |
 | `DSH_TRUSTED_HOSTS` | – | Extra accepted authorities, comma or space separated. |
 | `DSH_TLS_CERT` | – | PEM certificate chain for the listener. Requires `DSH_TLS_KEY`. |
 | `DSH_TLS_KEY` | – | Unencrypted PEM private key. Requires `DSH_TLS_CERT`. |
