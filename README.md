@@ -1,6 +1,6 @@
 # DeepSeek Harness Docker image
 
-Container packaging for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`), the open-source agent harness from DeepSeek AI. The image installs the official `@deepseek-ai/dsh` npm package and serves the Web UI from a non-root container.
+Container packaging for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`), the open-source agent harness from DeepSeek AI. The image installs the official `@deepseek-ai/dsh` npm package and serves the Web UI as the unprivileged `node` user (UID 1000).
 
 This is a community packaging repository, not an official DeepSeek AI image. DeepSeek Harness is developer-preview software: review its [safety notice](https://github.com/deepseek-ai/deepseek-harness/blob/master/SAFETY.md) before exposing it to anything.
 
@@ -106,13 +106,9 @@ The certificate must cover the hostname or IP the browser opens, and both files 
 
 ## Data, workspace, and permissions
 
-- `/home/node/.dsh` holds credentials, profiles, sessions, attachments, and the browser-session signing secret. Mount a named volume or a host directory owned by UID 1000.
-- `/workspace` is the default working directory and the recommended workspace mount for the agent.
-- The container runs as `node` (UID/GID 1000). For a bind mount, fix ownership first:
-  ```sh
-  mkdir -p workspace && sudo chown -R 1000:1000 workspace
-  ```
-- At startup the image sets `DSH_HOME` to mode `700` and, if present, `.credentials.yaml` to `600`, matching DSH's credential check.
+- `/home/node/.dsh` holds credentials, profiles, sessions, attachments, and the browser-session signing secret. `/workspace` is the default working directory and the recommended workspace mount for the agent.
+- Mount either as a named volume or as a host directory; nothing has to be prepared on the host. The entrypoint gives `DSH_HOME` to UID 1000, sets `DSH_HOME` to mode `700` and `.credentials.yaml` to `600` (matching DSH's credential check), then runs DSH as `node`.
+- Both paths are declared as image mount points (`VOLUME` in the Dockerfile), so `docker inspect` and container managers list them without being told the paths. The trade-off: `docker run` without `-v` puts the data in anonymous volumes that outlive the container, so clean them up with `docker volume ls` and `docker volume prune` if you experiment.
 
 ## Image variants and tags
 
@@ -127,9 +123,11 @@ The certificate must cover the hostname or IP the browser opens, and both files 
 
 Every build also gets a `sha-<commit>` tag and a `dsh-<version>` tag for the resolved `@deepseek-ai/dsh` release. For git tags such as `v1.0.0`, builds get version tags too. The devtools variant prefixes all of them with `devtools-` (`devtools-sha-...`, `devtools-dsh-...`).
 
+When Docker Hub publishing is enabled, the same tags appear under `docker.io/<dockerhub-user>/deepseek-harness`, for example `<dockerhub-user>/deepseek-harness:devtools-latest`.
+
 ## Building and publishing
 
-The GitHub Actions workflow in [`.github/workflows/docker.yml`](.github/workflows/docker.yml) builds both variants for `linux/amd64` and `linux/arm64` and pushes them to GHCR:
+The GitHub Actions workflow in [`.github/workflows/docker.yml`](.github/workflows/docker.yml) builds both variants for `linux/amd64` and `linux/arm64` and pushes them to GHCR. When the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets are set, the same image is pushed to Docker Hub at the same time, under `docker.io/<DOCKERHUB_USERNAME>/deepseek-harness`, with the identical tag set:
 
 - daily schedule (02:15 UTC) → resolve the npm `latest` dist-tag and build only if `dsh-<version>` or `devtools-dsh-<version>` is missing
 - push to `main` → `latest` / `devtools-latest`
@@ -141,7 +139,7 @@ Every build installs the exact version resolved by the upstream job, so a build 
 
 ### Automatic upstream tracking
 
-The schedule checks `https://registry.npmjs.org/@deepseek-ai/dsh/latest` once a day. Unless both `dsh-<version>` and `devtools-dsh-<version>` already exist in GHCR, it rebuilds both variants, refreshes `latest`, and adds the version tags. This follows npm's `latest` dist-tag, which is what the image installs; a GitHub release that is not published to that dist-tag (or a version only available under `next`) will not trigger it, but you can build it with manual dispatch. Scheduled workflows only run once this file is on the default branch.
+The schedule checks `https://registry.npmjs.org/@deepseek-ai/dsh/latest` once a day. Unless both `dsh-<version>` and `devtools-dsh-<version>` already exist in GHCR, it rebuilds both variants, refreshes `latest`, and adds the version tags. GHCR stays the gate for that decision; if a run pushed to one registry but failed on the other, trigger the workflow manually to re-publish both. This follows npm's `latest` dist-tag, which is what the image installs; a GitHub release that is not published to that dist-tag (or a version only available under `next`) will not trigger it, but you can build it with manual dispatch. Scheduled workflows only run once this file is on the default branch.
 
 After the first push, the GHCR package is private by default. Make it public in the package settings, or authenticate before pulling:
 
@@ -165,7 +163,7 @@ Pull a newer image and recreate the container; `DSH_HOME` survives. The launch t
 
 ## Security notes
 
-- DSH runs model-generated commands with the container user's authority. A container is not a hard security boundary; mount only the directories the agent should touch, and never mount the Docker socket, SSH keys, or unrelated credentials.
+- DSH runs model-generated commands as UID 1000; the container starts as root only for the entrypoint's ownership step. A container is not a hard security boundary; mount only the directories the agent should touch, and never mount the Docker socket, SSH keys, or unrelated credentials.
 - The printed URL contains a process credential. Do not paste it into issue trackers, logs, or chat.
 - Do not expose the port to untrusted networks over plain HTTP. Prefer listener TLS or an HTTPS reverse proxy.
 - Changing the browser-session secret is the global logout mechanism: delete the `client-connection/browser-session` entry under `records:` in `.credentials.yaml` and restart. Every issued cookie is then invalid.

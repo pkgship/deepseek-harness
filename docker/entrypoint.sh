@@ -26,9 +26,25 @@ public_authority="${public_authority%%/*}"
 [[ -n "$public_authority" ]] || die "DSH_PUBLIC_URL=$public_url does not name a host."
 
 mkdir -p "$DSH_HOME" || die "cannot create DSH_HOME=$DSH_HOME"
+
+# The container starts as root for this step alone: a bind mount, or files left by
+# an earlier run under a different user, can belong to root and only root can hand
+# them to the image user. DSH itself is exec'd as node, so the harness never runs
+# with privileges.
+drop=()
+if [[ "$(id -u)" == "0" ]]; then
+  node_uid="$(id -u node)"
+  node_gid="$(id -g node)"
+  chown -R "$node_uid:$node_gid" "$DSH_HOME" \
+    || die "cannot chown $DSH_HOME to $node_uid:$node_gid; the host filesystem refuses ownership changes (read-only mount?)."
+  drop=(setpriv --reuid="$node_uid" --regid="$node_gid" --init-groups)
+elif [[ ! -w "$DSH_HOME" ]]; then
+  die "DSH_HOME=$DSH_HOME is not writable by UID $(id -u); use the image default (root) or a named volume (-v dsh-home:$DSH_HOME)."
+fi
 chmod 700 "$DSH_HOME" 2>/dev/null || true
 if [[ -f "$DSH_HOME/.credentials.yaml" ]]; then
-  chmod 600 "$DSH_HOME/.credentials.yaml" || die "cannot restrict $DSH_HOME/.credentials.yaml to mode 600"
+  chmod 600 "$DSH_HOME/.credentials.yaml" \
+    || die "cannot restrict $DSH_HOME/.credentials.yaml to mode 600."
 fi
 
 args=(
@@ -60,4 +76,4 @@ log "bind:   $bind_host:$DSH_PORT"
 log "public: $public_url"
 log "open the 'dsh web: ...' URL below once; its token sets the browser session cookie."
 
-exec dsh "${args[@]}" "$@"
+exec "${drop[@]}" dsh "${args[@]}" "$@"

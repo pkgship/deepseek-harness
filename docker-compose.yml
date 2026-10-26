@@ -13,8 +13,9 @@ services:
     volumes:
       - dsh-home:/home/node/.dsh
       - dsh-workspace:/workspace
-      # To work on host files, replace the line above with a bind mount owned by UID 1000:
-      # - ./workspace:/workspace
+      # Host directories work too; the entrypoint gives them to UID 1000 by itself.
+      # - ./data/dsh-home:/home/node/.dsh
+      # - ./data/workspace:/workspace
     restart: unless-stopped
 
 volumes:

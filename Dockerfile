@@ -74,7 +74,16 @@ RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
 USER node
 RUN dsh --version && pnpm --version
 
+# The entrypoint starts as root so it can hand a root-owned bind mount to UID 1000,
+# then execs DSH as node. A manager that overrides this to a non-root UID cannot
+# repair permissions, but it still starts.
+# hadolint ignore=DL3066
+USER root
+
 WORKDIR /workspace
+
+# Advertised mount points: container management UIs list these automatically.
+VOLUME ["/home/node/.dsh", "/workspace"]
 
 EXPOSE 3080
 
